@@ -20,11 +20,10 @@ docker compose up -d
 - **PostgreSQL (В Redash добавьте Data Source → PostgreSQL: Host `db`, Port `5432`, User/Password `user`/`pass` (по умолчанию), Database `analytics_db`.
 
 
-
-#Работа с редаш
-Создаем дашборд:
-![Дашборд](C:\Users\HardBass\Downloads\Проект Data аналитика\Проект Data аналитика\screenshots\Opera Снимок_2026-03-07_003305_localhost)
-
+## Работа с редаш. Создаём дашборды.
+![](screenshots/Opera%20Снимок_2026-03-07_003305_localhost.png)
+![](screenshots/Opera%20Снимок_2026-03-07_003324_localhost.png)
+![](screenshots/Opera%20Снимок_2026-03-06_234542_localhost.png)
 
 
 
