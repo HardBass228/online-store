@@ -1,0 +1,130 @@
+# Запуск: docker compose up -d
+# Переменные заданы по умолчанию; при необходимости создайте .env из ".env example"
+services:
+  db:
+    image: postgres:16
+    container_name: demo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_DB: ${DEMO_DB:-analytics_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Инициализация: 00-create-redash.sql (БД redash), 10-init.sql (схема магазина)
+      - ./db:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7-alpine
+    container_name: redash-redis
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+
+  # Инициализация метаданных Redash (create_db идемпотентен)
+  redash-init:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash-init
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "0"
+      REDASH_LOG_LEVEL: "INFO"
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-pass}@db:5432/${REDASH_DB:-redash}
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET:-change-me-cookie-secret-32-chars}
+      REDASH_SECRET_KEY: ${REDASH_SECRET_KEY:-change-me-secret-key-32-chars}
+      REDASH_RATELIMIT_ENABLED: "false"
+    command: create_db
+
+  redash-server:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash-server
+    restart: unless-stopped
+    depends_on:
+      redash-init:
+        condition: service_completed_successfully
+    environment:
+      PYTHONUNBUFFERED: "0"
+      REDASH_LOG_LEVEL: "INFO"
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-pass}@db:5432/${REDASH_DB:-redash}
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET:-change-me-cookie-secret-32-chars}
+      REDASH_SECRET_KEY: ${REDASH_SECRET_KEY:-change-me-secret-key-32-chars}
+      REDASH_RATELIMIT_ENABLED: "false"
+    ports:
+      - "5000:5000"
+    command: server
+
+  redash-scheduler:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash-scheduler
+    restart: unless-stopped
+    depends_on:
+      redash-server:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "0"
+      REDASH_LOG_LEVEL: "INFO"
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-pass}@db:5432/${REDASH_DB:-redash}
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET:-change-me-cookie-secret-32-chars}
+      REDASH_SECRET_KEY: ${REDASH_SECRET_KEY:-change-me-secret-key-32-chars}
+      REDASH_RATELIMIT_ENABLED: "false"
+      QUEUES: "celery"
+      WORKERS_COUNT: "1"
+    command: scheduler
+
+  redash-worker:
+    image: redash/redash:10.1.0.b50633
+    container_name: redash-worker
+    restart: unless-stopped
+    depends_on:
+      redash-server:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    environment:
+      PYTHONUNBUFFERED: "0"
+      REDASH_LOG_LEVEL: "INFO"
+      REDASH_REDIS_URL: redis://redis:6379/0
+      REDASH_DATABASE_URL: postgresql://${POSTGRES_USER:-user}:${POSTGRES_PASSWORD:-pass}@db:5432/${REDASH_DB:-redash}
+      REDASH_COOKIE_SECRET: ${REDASH_COOKIE_SECRET:-change-me-cookie-secret-32-chars}
+      REDASH_SECRET_KEY: ${REDASH_SECRET_KEY:-change-me-secret-key-32-chars}
+      REDASH_RATELIMIT_ENABLED: "false"
+      QUEUES: "queries,scheduled_queries,schemas,periodic,emails,default"
+      WORKERS_COUNT: "2"
+    command: worker
+
+  generator:
+    build:
+      context: ./generator
+    container_name: demo-generator
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-pass}
+      POSTGRES_DB: ${DEMO_DB:-analytics_db}
+      PYTHONUNBUFFERED: "1"
+
+volumes:
+  postgres_data:
